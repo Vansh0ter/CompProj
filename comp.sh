@@ -1,45 +1,46 @@
-#!/bin/sh
+#!/bin/bash
 
-#env
-if [ ! -d log ]; 
-then
-  mkdir log
-fi
-dd if=/dev/zero of=env.img bs=1M count=100
-mkfs.ext4 env.img
-sudo mount -o loop env.img log
-sudo chmod 777 log
-rm -rf log/lost+found
-rm env.img
-if [ ! -d back ]; 
-then
-  mkdir back
+SCRIPT_DIR="$(dirname "$0")" # Получаем директорию скрипта
+LOG_DIR="$SCRIPT_DIR/log"
+BACKUP_DIR="$SCRIPT_DIR/backup"
+MAX_SIZE=$((2 * 1024 * 1024 * 1024))  # 2 ГБ в байтах
+THRESHOLD_SIZE=$((MAX_SIZE * 70 / 100))  # 70% от 2 ГБ
+
+# Проверка аргументов
+if [ $# -ne 1 ]; then
+    echo "Использование: $0 <порог_в_%>"
+    exit 1
 fi
 
-#reading X
-echo -e "\e[4mEnter X ammount.\e[0m"
-read X
-D= $X * 0.7
+# Создание папок, если они не существуют
+mkdir -p "$LOG_DIR" "$BACKUP_DIR"
 
-#reading log
-Y= du -s log | awk '{print $1}'
-# echo $Y
+# Получение текущего размера папки в байтах
+CURRENT_SIZE=$(du -sb "$LOG_DIR" | awk '{print $1}')
 
-#main condition
-if [$Y -le $D]
-then
-	#archiving
-	sudo tar -czf back.tar.gz log
-	echo -e "\e[42mLog Archived\e[0m"
-	#removing files in log
-	sudo rm -rf log/*
-	#backup moving
-	mv back.tar.gz back
-	echo -e "\e[42mArchive moved\e[0m"
+# Проверка заполнения
+if [ "$CURRENT_SIZE" -ge "$THRESHOLD_SIZE" ]; then
+    echo "Папка $LOG_DIR заполнена на $(($CURRENT_SIZE / 1024 / 1024)) MB. Начинаю архивирование..."
+
+    # Находим N старейших файлов
+    N=5
+    OLD_FILES=$(ls -t "$LOG_DIR" | tail -n "$N")
+    if [ -z "$OLD_FILES" ]; then
+        echo "Нет файлов для архивирования."
+        exit 0
+    fi
+
+    # Создание архива
+    TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
+    ARCHIVE_FILE="$BACKUP_DIR/archive_$TIMESTAMP.tar.gz"
+    tar -czf "$ARCHIVE_FILE" -C "$LOG_DIR" $OLD_FILES
+
+    # Удаление архивированных файлов
+    for file in $OLD_FILES; do
+        rm "$LOG_DIR/$file"
+    done
+
+    echo "Файлы архивированы в $ARCHIVE_FILE и удалены из $LOG_DIR."
+else
+    echo "Папка $LOG_DIR заполнена на $(($CURRENT_SIZE / 1024 / 1024)) MB. Архивирование не требуется."
 fi
-
-#unmounting limited folder
-sudo umount log
-echo -e "Log folder \e[4munmounted\e[0m."
-
-
